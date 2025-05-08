@@ -17,6 +17,7 @@ import (
 const (
 	defaultTimeout = 500 * time.Millisecond
 	defaultThreads = 100
+	version        = "1.0.0"
 )
 
 // Informações do serviço por porta
@@ -48,6 +49,34 @@ type PortResult struct {
 	Port    int
 	State   string
 	Service string
+}
+
+// Função para exibir a mensagem de ajuda personalizada
+func showCustomHelp() {
+	fmt.Println("Argos - Scanner de Portas TCP")
+	fmt.Printf("Versão: %s\n\n", version)
+	fmt.Println("USO:")
+	fmt.Println("  go run argos.go [opções]")
+	fmt.Println("\nOPÇÕES:")
+	fmt.Println("  -host string")
+	fmt.Println("        Host para escanear (obrigatório)")
+	fmt.Println("  -p string")
+	fmt.Println("        Range de portas para escanear (ex: 22,80,100-200) (default \"1-1024\")")
+	fmt.Println("  -t int")
+	fmt.Printf("        Número de threads concorrentes (default %d)\n", defaultThreads)
+	fmt.Println("  -timeout int")
+	fmt.Printf("        Timeout em milissegundos (default %d)\n", int(defaultTimeout/time.Millisecond))
+	fmt.Println("  -v")
+	fmt.Println("        Modo verbose - exibe mais informações")
+	fmt.Println("  -4")
+	fmt.Println("        Usar apenas IPv4 (default true)")
+	fmt.Println("  -h, -help")
+	fmt.Println("        Exibe esta mensagem de ajuda")
+	fmt.Println("\nEXEMPLOS:")
+	fmt.Println("  go run argos.go -host example.com")
+	fmt.Println("  go run argos.go -host 192.168.1.1 -p 22,80,443 -t 50 -timeout 1000")
+	fmt.Println("  go run argos.go -host scanme.nmap.org -p 1-1000 -v")
+	os.Exit(0)
 }
 
 // Parser para o range de portas
@@ -186,6 +215,14 @@ func isHostAlive(host string, timeout time.Duration) bool {
 }
 
 func main() {
+	// Verifica se a ajuda foi solicitada diretamente (antes de processar outros flags)
+	for _, arg := range os.Args[1:] {
+		if arg == "-help" || arg == "--help" || arg == "-h" {
+			showCustomHelp()
+			return
+		}
+	}
+
 	// Configura os argumentos de linha de comando
 	var (
 		portRange string
@@ -201,7 +238,9 @@ func main() {
 	flag.IntVar(&timeout, "timeout", int(defaultTimeout/time.Millisecond), "Timeout em milissegundos")
 	flag.BoolVar(&verbose, "v", false, "Modo verbose - exibe mais informações")
 	useIPv4 := flag.Bool("4", true, "Usar apenas IPv4")
-	flag.Parse()
+
+	// Configurando a flag de ajuda personalizada
+	flag.Usage = showCustomHelp
 	flag.Parse()
 
 	// Verifica se o host foi fornecido
