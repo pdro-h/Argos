@@ -13,14 +13,12 @@ import (
 	"time"
 )
 
-// Configurações padrão
 const (
 	defaultTimeout = 500 * time.Millisecond
 	defaultThreads = 100
 	version        = "1.0.0"
 )
 
-// Informações do serviço por porta
 var commonPorts = map[int]string{
 	21:   "FTP",
 	22:   "SSH",
@@ -44,14 +42,12 @@ var commonPorts = map[int]string{
 	8080: "HTTP-Proxy",
 }
 
-// Resultato de um scan de porta
 type PortResult struct {
 	Port    int
 	State   string
 	Service string
 }
 
-// Função para exibir a mensagem de ajuda personalizada
 func showCustomHelp() {
 	fmt.Println("Argos - Scanner de Portas TCP")
 	fmt.Printf("Versão: %s\n\n", version)
@@ -70,20 +66,21 @@ func showCustomHelp() {
 	fmt.Println("        Modo verbose - exibe mais informações")
 	fmt.Println("  -4")
 	fmt.Println("        Usar apenas IPv4 (default true)")
+	fmt.Println("  -Pn")
+	fmt.Println("        Pular host discovery (assume host online)")
 	fmt.Println("  -h, -help")
 	fmt.Println("        Exibe esta mensagem de ajuda")
 	fmt.Println("\nEXEMPLOS:")
 	fmt.Println("  go run argos.go -host example.com")
 	fmt.Println("  go run argos.go -host 192.168.1.1 -p 22,80,443 -t 50 -timeout 1000")
 	fmt.Println("  go run argos.go -host scanme.nmap.org -p 1-1000 -v")
+	fmt.Println("  go run argos.go -host 10.10.10.1 -Pn -p 1-65535")
 	os.Exit(0)
 }
 
-// Parser para o range de portas
 func parsePortRange(portRange string) ([]int, error) {
 	var ports []int
 
-	// Se vazio, retorna lista vazia
 	if portRange == "" {
 		return ports, nil
 	}
@@ -126,22 +123,18 @@ func parsePortRange(portRange string) ([]int, error) {
 	return ports, nil
 }
 
-// Verifica se o host é válido e prioriza IPv4
 func validateHost(host string) (string, error) {
-	// Tenta resolver o host para testar se é válido
 	ips, err := net.LookupIP(host)
 	if err != nil {
 		return "", fmt.Errorf("não foi possível resolver o host %s: %v", host, err)
 	}
 
-	// Procura primeiro por um endereço IPv4
 	for _, ip := range ips {
 		if ipv4 := ip.To4(); ipv4 != nil {
 			return ipv4.String(), nil
 		}
 	}
 
-	// Se não encontrou IPv4, usa o primeiro IP disponível
 	if len(ips) > 0 {
 		return ips[0].String(), nil
 	}
@@ -149,7 +142,6 @@ func validateHost(host string) (string, error) {
 	return "", fmt.Errorf("nenhum endereço IP encontrado para %s", host)
 }
 
-// Função para escanear uma porta
 func scanPort(host string, port int, timeout time.Duration) PortResult {
 	result := PortResult{
 		Port:    port,
@@ -159,7 +151,6 @@ func scanPort(host string, port int, timeout time.Duration) PortResult {
 
 	address := fmt.Sprintf("%s:%d", host, port)
 
-	// Tenta conectar explicitamente via TCP
 	d := net.Dialer{Timeout: timeout}
 	conn, err := d.Dial("tcp", address)
 
@@ -167,27 +158,20 @@ func scanPort(host string, port int, timeout time.Duration) PortResult {
 		defer conn.Close()
 		result.State = "open"
 
-		// Adiciona informação do serviço se conhecida
 		if service, ok := commonPorts[port]; ok {
 			result.Service = service
 		} else {
-			// Tenta identificar o serviço usando banner grabbing para portas desconhecidas
-			// Definimos um timeout mais curto para leitura do banner
 			readTimeout := 200 * time.Millisecond
 			err := conn.SetReadDeadline(time.Now().Add(readTimeout))
 			if err == nil {
-				// Buffer para armazenar o banner
 				buff := make([]byte, 1024)
-				// Tenta ler alguns bytes para ver se há um banner
 				_, err := conn.Read(buff)
 				if err == nil {
-					// Se conseguimos ler algo, podemos considerar um serviço personalizado
 					result.Service = "custom-service"
 				}
 			}
 		}
 	} else {
-		// Verifica se é filtrado (firewall) ou realmente fechado
 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 			result.State = "filtered"
 		}
@@ -197,7 +181,6 @@ func scanPort(host string, port int, timeout time.Duration) PortResult {
 }
 
 func isHostAlive(host string, timeout time.Duration) bool {
-	// Tenta uma conexão rápida na porta 80 ou 443 para ver se o host está online
 	for _, port := range []int{80, 443} {
 		address := fmt.Sprintf("%s:%d", host, port)
 		conn, err := net.DialTimeout("tcp", address, timeout)
@@ -207,15 +190,12 @@ func isHostAlive(host string, timeout time.Duration) bool {
 		}
 	}
 
-	// Tenta ping (ICMP) - não funciona em todos os ambientes devido a permissões
-	// Este é um ping TCP simplificado
 	cmd := exec.Command("ping", "-c", "1", "-W", "2", host)
 	err := cmd.Run()
 	return err == nil
 }
 
 func main() {
-	// Verifica se a ajuda foi solicitada diretamente (antes de processar outros flags)
 	for _, arg := range os.Args[1:] {
 		if arg == "-help" || arg == "--help" || arg == "-h" {
 			showCustomHelp()
@@ -223,7 +203,6 @@ func main() {
 		}
 	}
 
-	// Configura os argumentos de linha de comando
 	var (
 		portRange string
 		host      string
@@ -238,18 +217,16 @@ func main() {
 	flag.IntVar(&timeout, "timeout", int(defaultTimeout/time.Millisecond), "Timeout em milissegundos")
 	flag.BoolVar(&verbose, "v", false, "Modo verbose - exibe mais informações")
 	useIPv4 := flag.Bool("4", true, "Usar apenas IPv4")
+	pn := flag.Bool("Pn", false, "Pular host discovery (assume host online)")
 
-	// Configurando a flag de ajuda personalizada
 	flag.Usage = showCustomHelp
 	flag.Parse()
 
-	// Verifica se o host foi fornecido
 	if host == "" {
 		fmt.Print("Digite o host para escanear: ")
 		fmt.Scanln(&host)
 	}
 
-	// Valida e resolve o host
 	resolvedIP, err := validateHost(host)
 	if err != nil {
 		fmt.Println("Erro:", err)
@@ -258,16 +235,16 @@ func main() {
 
 	timeoutDuration := time.Duration(timeout) * time.Millisecond
 
-	// Verifica se o host está online
-	fmt.Printf("Verificando se %s está online...\n", host)
-	if !isHostAlive(resolvedIP, timeoutDuration*2) {
-		fmt.Printf("Aviso: %s (%s) parece estar offline ou inacessível.\n", host, resolvedIP)
-		fmt.Println("Continuando com o scan, mas resultados podem ser imprecisos.")
-	} else {
-		fmt.Printf("Host %s (%s) está online.\n", host, resolvedIP)
+	if !*pn {
+		fmt.Printf("Verificando se %s está online...\n", host)
+		if !isHostAlive(resolvedIP, timeoutDuration*2) {
+			fmt.Printf("Aviso: %s (%s) parece estar offline ou inacessível.\n", host, resolvedIP)
+			fmt.Println("Continuando com o scan, mas resultados podem ser imprecisos.")
+		} else {
+			fmt.Printf("Host %s (%s) está online.\n", host, resolvedIP)
+		}
 	}
 
-	// Respeita a flag IPv4 (useIPv4)
 	if *useIPv4 && !strings.Contains(resolvedIP, ".") {
 		fmt.Println("Forçando uso de IPv4, mas apenas endereço IPv6 disponível. Tentando re-resolver...")
 		addrs, err := net.LookupHost(host)
@@ -282,34 +259,29 @@ func main() {
 		}
 	}
 
-	// Parse do range de portas
 	ports, err := parsePortRange(portRange)
 	if err != nil {
 		fmt.Println("Erro no range de portas:", err)
 		os.Exit(1)
 	}
 
-	// Usa 1-1024 como default se nenhuma porta for especificada
 	if len(ports) == 0 {
 		for i := 1; i <= 1024; i++ {
 			ports = append(ports, i)
 		}
 	}
 
-	// Exibe informações do scan
 	fmt.Printf("\nIniciando scan em %s (%s)\n", host, resolvedIP)
 	fmt.Printf("Escaneando %d portas com %d threads e timeout de %dms\n", len(ports), threads, timeout)
 	fmt.Println("Iniciando scan TCP...\n")
 	startTime := time.Now()
 
-	// Configura os workers com semáforo para controlar concorrência
 	var wg sync.WaitGroup
 	results := make([]PortResult, 0)
 	resultsChan := make(chan PortResult)
 	done := make(chan bool)
 	sem := make(chan struct{}, threads)
 
-	// Goroutine para coletar resultados
 	go func() {
 		for result := range resultsChan {
 			if result.State == "open" {
@@ -324,36 +296,32 @@ func main() {
 		done <- true
 	}()
 
-	// Inicia os scans
 	for _, port := range ports {
 		wg.Add(1)
-		sem <- struct{}{} // Adquire um slot no semáforo
+		sem <- struct{}{}
 
 		go func(p int) {
 			defer wg.Done()
-			defer func() { <-sem }() // Libera o slot no semáforo
+			defer func() { <-sem }()
 
 			result := scanPort(resolvedIP, p, timeoutDuration)
 			resultsChan <- result
-			// Exibir progresso a cada 100 portas
+
 			if p%100 == 0 {
 				fmt.Printf("\rEscaneando... %.1f%% concluído", float64(p)/float64(len(ports))*100)
 			}
 		}(port)
 	}
 
-	// Aguarda todos os scans terminarem
 	wg.Wait()
 	close(resultsChan)
 	<-done
 
-	// Ordena os resultados por porta
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].Port < results[j].Port
 	})
 
-	// Exibe os resultados
-	fmt.Printf("\r                                                           \r") // Limpa a linha de progresso
+	fmt.Printf("\r                                                           \r")
 	fmt.Println("\nPortas escaneadas:", len(ports))
 
 	if len(results) > 0 {
